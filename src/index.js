@@ -43,8 +43,10 @@ class Editor extends React.Component<{}, {css:string, currentEmojiName:string}> 
         </div>
 
         <div id="right-side" style={{flex:"1 1 50%"}}>
-          <div id="preview-panel" style={{}}>
-            <YTChatRoom handleOnClick={(name) => this.handleOnClick(name)}></YTChatRoom>
+          <div id="preview-panel-outer">
+            <div id="preview-panel-inner">
+              <YTChatRoom handleOnClick={(name) => this.handleOnClick(name)}></YTChatRoom>
+            </div>
           </div>
           
           <label htmlFor="css-input-field">css:</label>
@@ -74,116 +76,148 @@ class Editor extends React.Component<{}, {css:string, currentEmojiName:string}> 
 }
 
 
-class AnimationEditor extends React.Component<
-  {
-    emojiName: string,
-    controlPointSize: number,
-  },
-  {
-    corners: Array<Vec>,
-    transform: string,
-    keyframes: Array<any>,
-    time: number,
-    emojiCss: string,
-    emojiRect: Rect,
-    containerRect: Rect,
-    viewPos: Vec,
-    viewScale: number,
-  }> {
 
-  static defaultProps: {
+type AnimationEditorProps = {
+  emojiName: string,
+  controlPointSize: number,
+  gridSize: number,
+}
+
+type AnimationEditorState = {
+  corners: Array<Vec>,
+  transform: string,
+  keyframes: Array<any>,
+  time: number,
+  emojiCss: string,
+  viewPos: Vec,
+  viewScale: number,
+  viewUpdated: boolean,
+  lastMousePos: ?Vec,
+}
+
+class AnimationEditor extends React.Component<AnimationEditorProps, AnimationEditorState> {
+
+  static defaultProps = {
     emojiName: "",
+    controlPointSize: 5,
+    gridSize: 10,
   }
 
-  constructor(props) {
-    super(props);
-    
-    this.state = {
-      corners: [[-1,1], [1,1], [1,-1], [-1,-1]],
-      transform: "",
-      keyframes: [],
-      time: 0,
-      emojiCss: "#editing-emoji {transform: scale(1.0)}",
-      emojiRect: new DOMRect(0,0,0,0),
-      containerRect: new DOMRect(0,0,0,0),
-      viewPos: [100, 100],
-      viewScale: 2.0,
-    }
+  state = {
+    corners: [[-1,1], [1,1], [1,-1], [-1,-1]],
+    transform: "",
+    keyframes: [],
+    time: 0,
+    emojiCss: "#editing-emoji {transform: scale(1.0)}",
+    viewPos: [0, 0],
+    viewScale: 1.0,
+    viewUpdated: false,
+    lastMousePos: null,
   }
-  
-  componentDidUpdate(prevProps, prevState, snapshot) {
-    console.log("componentDidMount")
-    if (prevProps.emojiName !== this.props.emojiName) {
-      this.updateCorners();
-    }
-  }
-
 
   render() {
     const emojiName = this.props.emojiName;
     const alt = emojiNameToAlt(emojiName);
 
+
+    const viewportDiv = (
+      <div id="viewport" 
+        style={{
+          position:"absolute",
+          transformOrigin: "top left",
+          transform:`scale(${this.state.viewScale}) translate${vecToStr(neg(this.state.viewPos))}`
+        }}>
+        <YTChatRoomStructure>
+          <YTChatMessage authorName="ZAKO">
+            {alt ? alt : "Select an emoji to edit"}
+            <YTEmoji id="editing-emoji" emojiName={emojiName} draggable="false" style={{userDrag: "none", userSelect:"none"}}></YTEmoji>
+            {alt}
+          </YTChatMessage>
+        </YTChatRoomStructure>
+      </div>
+    );
+    
+
+    const controlPoints = [];
+    const grids = [];
+    let overlayDiv = (
+      <div id="viewport-overlay" onMouseDown={this.handleMouseDown} onMouseMove={this.handleMouseMove} onMouseUp={this.handleMouseUp}>
+        <svg style={{position: "absolute", width:"100%", height:"100%", zIndex:0}}>
+          {grids}
+        </svg>
+        <svg style={{position: "absolute", width:"100%", height:"100%", zIndex:3}}>
+          {controlPoints}
+        </svg>
+      </div>
+    );
+
+    const corners = this.calculateConers();
+    for (let i=0; i<4; i++) {
+      controlPoints.push(
+        <rect className="control-point"
+          width={this.props.controlPointSize} height={this.props.controlPointSize}
+          key = {i}
+          style={{transform:`translate${vecToStr(corners[i])}`}}/>
+      )
+    }
+
+
+    const originPos = this.worldToScreen([0,0]);
+    grids.push(
+      <circle
+        cx={originPos[0]}
+        cy={originPos[1]}
+        r="5"
+        stroke="black" strokeWidth="2" fill="grey"
+        key={0} />
+    )
+
+    for (let i=-30; i<=50; i++) {
+      let p = math.dotMultiply([i,i], this.props.gridSize)
+      p = this.worldToScreen(p)
+      grids.push(
+        <line x1={p[0]} y1={-1e5} x2={p[0]} y2={1e5} strokeWidth={1} key={"x"+i} stroke="grey"/>
+      )
+      grids.push(
+        <line x1={-1e5} y1={p[1]} x2={1e5} y2={p[1]} strokeWidth={1} key={"y"+i} stroke="grey"/>
+      )
+    }
+
+    const toolbar = (
+      <div id="animation-editor-tool">
+        <button id="record-button"> ● </button>
+        <input
+          id="timeline" type="range" name="timeline" min="0" max="1" step="0.01"
+          value={this.state.time}/>
+      </div>
+    );
+
     return (
       <div id="animation-editor">
-        <div id="animation-editor-board" onDragOver={(event)=>this.allowDrop(event)}>
-          <div style={{position:"absolute", maxHeight:"100%", transform:`scale(${this.state.viewScale}) translate${vecToStr(this.state.viewPos)}`, zIndex:1}}>
-            <YTChatRoomStructure>
-              <YTChatMessage authorName="ZAKO">
-                {alt ? alt : "Select an emoji to edit"}
-                <YTEmoji id="editing-emoji" emojiName={emojiName} draggable="false" style={{userDrag: "none", userSelect:"none"}}></YTEmoji>
-                {alt}
-              </YTChatMessage>
-            </YTChatRoomStructure>
-          </div>
-          <div id="control-point-container" style={{margin:"0", padding:"0", border:"0", zIndex:2, height:"100%", width:"100%"}}>
-            <svg style={{position:"absolute", width:"100%", height:"100%", zIndex:3}}>
-              <rect width={this.props.controlPointSize} height={this.props.controlPointSize}
-                style={{fill:"rgb(255,255,255)", strokeWidth:"1", stroke:"rgb(0,0,0)", transform:`translate${vecToStr(this.state.corners[0])}` , zIndex:4}}/>
-              <rect width={this.props.controlPointSize} height={this.props.controlPointSize}
-                style={{fill:"rgb(255,255,255)", strokeWidth:"1", stroke:"rgb(0,0,0)", transform:`translate${vecToStr(this.state.corners[1])}`}}/>
-              <rect width={this.props.controlPointSize} height={this.props.controlPointSize}
-                style={{fill:"rgb(255,255,255)", strokeWidth:"1", stroke:"rgb(0,0,0)", transform:`translate${vecToStr(this.state.corners[2])}`}}/>
-              <rect width={this.props.controlPointSize} height={this.props.controlPointSize}
-                style={{fill:"rgb(255,255,255)", strokeWidth:"1", stroke:"rgb(0,0,0)", transform:`translate${vecToStr(this.state.corners[3])}`}}/>
-            </svg>
-          </div>
+        <div id="animation-editor-board"
+          onDragOver={this.allowDrop}
+          onWheel={this.handleWheelEvent}>
+          {viewportDiv}
+          {overlayDiv}
         </div>
-        <div id="animation-editor-tool">
-          <button id="record-button"> ● </button>
-          <input
-            type="range" id="timeline" name="timeline" min="0" max="1" step="0.01"
-            value={this.state.time}
-            onChange={(e)=>this.handleTimeChange(e)}>
-          </input>
-        </div>
+        {toolbar}
         <style>{this.state.emojiCss}</style>
       </div>
     );
   }
-
-  updateCorners() {
-    console.log("getDerivedStateFromProps");
-    
-    const emojiRect = this.getEmojiRect();
-    const containerRect = this.getContainerRect();
-
-    if (emojiRect == null || containerRect == null) {
-      return;
-    }
-
-    const coordOrigin = [containerRect.left, containerRect.top];
-    
-    console.log(emojiRect);
-    console.log(containerRect);
-    console.log(coordOrigin);
-
-    this.setState({
-      emojiRect: emojiRect,
-      containerRect: containerRect,
-      corners: this.calculateConers(emojiRect, coordOrigin, [0.5, 0.5]),
-    });
-  }
   
+  componentDidMount() {
+    this.setState({viewUpdated: true});
+  }
+
+  componentDidUpdate(prevProps:AnimationEditorProps, prevState:AnimationEditorState, snapshot) {
+    if (prevProps.emojiName !== this.props.emojiName
+      || prevState.viewScale !== this.state.viewScale
+      || prevState.viewPos !== this.state.viewPos) {
+      this.setState({viewUpdated: true});
+    }
+  }
+
   getEmojiRect(): Rect|null {
     const emoji = document.querySelector("#editing-emoji");
     if (emoji !== null) {
@@ -193,18 +227,22 @@ class AnimationEditor extends React.Component<
   }
 
   getContainerRect(): Rect|null {
-    const container = document.querySelector("#control-point-container");
+    const container = document.querySelector("#viewport-overlay");
     if (container !== null) {
       return container.getBoundingClientRect();
     }
     return null;
   }
 
-  calculateConers(emojiRect:Rect, coordOrigin:Vec, controlPointSize:Vec): Array<Vec> {
-    console.log("calculateConers")
-    console.log(emojiRect)
-    console.log(coordOrigin)
-    console.log(math.subtract([emojiRect.left, emojiRect.top], coordOrigin))
+  calculateConers(): Array<Vec> {
+    const emojiRect = this.getEmojiRect();
+    const containerRect = this.getContainerRect();
+    if (emojiRect == null || containerRect == null) {
+      return [[0,0], [0,0], [0,0], [0,0]];
+    }
+    
+    const coordOrigin = [containerRect.left, containerRect.top];
+
     const corners:Array<Vec> = [
       (math.subtract([emojiRect.left, emojiRect.top], coordOrigin) : Vec),
       (math.subtract([emojiRect.right, emojiRect.top], coordOrigin): Vec),
@@ -213,27 +251,66 @@ class AnimationEditor extends React.Component<
     ];
 
     for (let i = 0; i < corners.length; i++) {
-      corners[i] = math.subtract(corners[i], controlPointSize);
+      const controlPointOffset = [this.props.controlPointSize/2, this.props.controlPointSize/2]
+      corners[i] = math.subtract(corners[i], controlPointOffset);
     }
     
     return corners;
   }
 
-  handleTimeChange(event) {
-    const t = event.target.value;
-    this.setState({time: t});
+  handleWheelEvent = (event:WheelEvent) => {
+    const scale = this.state.viewScale - event.deltaY * 0.001;
+    this.setState({viewScale: scale});
   }
 
+
   handleCornorMoved(pos, index) {
-    console.log(`move corner ${index} to ${pos}`);
+    const containerRect = NotNull<Rect>(this.getContainerRect());
     let corners = Array.from(this.state.corners);
-    corners[index] = math.subtract(pos, [this.state.containerRect.left, this.state.containerRect.top]);
+    corners[index] = math.subtract(pos, [containerRect.left, containerRect.top]);
     this.setState({corners: corners})
   }
 
-  allowDrop(event) {
+  allowDrop = (event) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
+  }
+
+  handleMouseDown = (event) => {
+    const lastMousePos = this.state.lastMousePos;
+    const mousePos = [event.clientX, event.clientY];
+    if (lastMousePos == null) {
+      this.setState({lastMousePos: mousePos});
+    }
+  }
+
+  handleMouseMove = (event) => {
+    const lastMousePos = this.state.lastMousePos;
+    const mousePos = [event.clientX, event.clientY];
+    const viewPos = this.state.viewPos;
+    if (lastMousePos != null) {
+      const displacement = math.dotDivide(math.subtract(mousePos, lastMousePos), this.state.viewScale)
+      const newViewPos = math.subtract(viewPos, displacement);
+      this.setState({
+        lastMousePos: mousePos,
+        viewPos: newViewPos,
+      });
+    }
+  }
+
+  handleMouseUp = (event) => {
+    this.setState({lastMousePos: null})
+  }
+
+  handleControlPointMouseDown = (event) => {
+    console.log(event)
+  }
+
+  worldToScreen(p:Vec):Vec {
+    return math.dotMultiply(math.subtract(p, this.state.viewPos), this.state.viewScale);
+  }
+  screenToWorld(p:Vec):Vec {
+    return math.add(math.dotMultiply(p, 1/this.state.viewScale), this.state.viewPos);
   }
 }
 
@@ -425,15 +502,21 @@ function vecToStr(v:Vec, unit='px'):string {
 
 ReactDOM.render(
   <Editor />,
-  DeNull(document.getElementById('root'))
+  NotNull<HTMLElement>(document.getElementById('root'))
 );
 
 
-function DeNull(x: any): any {
+function NotNull<T>(x: ?T): T {
   return (x: any)
 }
 
 
+function neg(v:Vec) : Vec{
+  return [-v[0], -v[1]]
+}
+
+/*
 function f() : number{
   return "123";
 }
+*/
